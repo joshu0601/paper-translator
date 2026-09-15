@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -11,6 +12,8 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import Embedding, Paragraph, Section
 from app.services.embeddings import cosine_similarity, get_embeddings
+
+log = logging.getLogger(__name__)
 
 CHUNKABLE_KINDS = {"paragraph", "list", "equation", "caption"}
 
@@ -92,6 +95,20 @@ def index_document(db: Session, document_id: str, chunks: list[Chunk]) -> None:
     db.commit()
 
 
+def ensure_index_current(db: Session, document_id: str, model_tag: str) -> None:
+    """Re-index a document whose chunks were embedded with a different provider
+    or dimension (e.g. after switching from the offline mock to OpenAI)."""
+    current = db.query(Embedding).filter(Embedding.document_id == document_id, Embedding.model == model_tag).count()
+    if current:
+        return
+    sections = db.query(Section).filter(Section.document_id == document_id).order_by(Section.order).all()
+    paragraphs = db.query(Paragraph).filter(Paragraph.document_id == document_id).order_by(Paragraph.order).all()
+    if not paragraphs:
+        return
+    log.info("re-indexing %s with embedding model %s", document_id, model_tag)
+    index_document(db, document_id, build_chunks(sections, paragraphs))
+
+
 def _row_to_chunk(row: Embedding) -> Chunk:
     return Chunk(
         index=row.chunk_index,
@@ -109,9 +126,11 @@ def retrieve(db: Session, document_id: str, query: str, *, top_k: int | None = N
     s = get_settings()
     top_k = top_k or s.retrieval_top_k
     provider = get_embeddings()
+    model_tag = f"{provider.name}:{provider.dimensions}"
+    ensure_index_current(db, document_id, model_tag)
     qvec = provider.embed_query(query)
 
-    stmt = select(Embedding).where(Embedding.document_id == document_id)
+    stmt = select(Embedding).where(Embedding.document_id == document_id, Embedding.model == model_tag)
     if section_id:
         stmt = stmt.where(Embedding.section_id == section_id)
     if page:

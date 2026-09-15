@@ -114,6 +114,20 @@ def get_file(doc: Document = Depends(get_document_or_404)):
     return StreamingResponse(io.BytesIO(storage.get(doc.storage_key)), media_type="application/pdf")
 
 
+@router.post("/{document_id}/process", response_model=DocumentOut)
+def reprocess(doc: Document = Depends(get_document_or_404), db: Session = Depends(get_db)):
+    """Re-run the whole pipeline (e.g. after a failure)."""
+    if doc.status == "processing":
+        raise HTTPException(status_code=409, detail="Document is still processing")
+    doc.status = "processing"
+    doc.error = None
+    doc.steps = pipeline.initial_steps()
+    db.commit()
+    db.refresh(doc)
+    pipeline.start_background(pipeline.run_pipeline, doc.id)
+    return doc
+
+
 @router.post("/{document_id}/translate", response_model=DocumentOut)
 def retranslate(doc: Document = Depends(get_document_or_404), db: Session = Depends(get_db)):
     if doc.status == "processing":

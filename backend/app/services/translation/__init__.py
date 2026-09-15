@@ -81,7 +81,28 @@ DEFAULT_TERMINOLOGY: dict[str, str] = {
     "Bandwidth": "頻寬",
 }
 
-_TERM_WITH_ACRONYM = re.compile(r"\b((?:[A-Z][a-zA-Z\-]+\s){1,4}[A-Z][a-zA-Z\-]+)\s*\((?:[A-Z]{2,8}s?)\)")
+_TERM_WITH_ACRONYM = re.compile(r"((?:[A-Za-z][A-Za-z\-]*\s+){1,6})\(([A-Z][A-Za-z]{1,7}?)s?\)")
+_STOP = {"of", "and", "the", "in", "for", "on", "to", "a", "an", "with", "by"}
+
+
+def _term_for_acronym(words: list[str], acronym: str) -> str | None:
+    """Pick the trailing words whose initials spell the acronym:
+    'the problem in multi-access edge computing (MEC)' → 'multi-access edge computing'."""
+    target = acronym.upper()
+    chosen: list[str] = []
+    variants = {""}
+    for w in reversed(words):
+        chosen.insert(0, w)
+        if w.lower() in _STOP:
+            continue
+        parts = [p for p in w.split("-") if p]
+        heads = {w[0].upper(), "".join(p[0].upper() for p in parts)}
+        variants = {h + v for v in variants for h in heads}
+        if target in variants:
+            return " ".join(chosen)
+        if all(len(v) >= len(target) for v in variants):
+            return None
+    return None
 
 
 class TranslationProvider(ABC):
@@ -98,10 +119,13 @@ class TranslationProvider(ABC):
 def extract_term_candidates(text: str, limit: int = 40) -> list[str]:
     """Terms introduced as `Long Form (ACRONYM)` are the paper's key vocabulary."""
     found: list[str] = []
+    seen_lower: set[str] = set()
     for m in _TERM_WITH_ACRONYM.finditer(text):
-        term = m.group(1).strip()
-        if term not in found and len(term) < 60:
-            found.append(term)
+        term = _term_for_acronym(m.group(1).split(), m.group(2))
+        if not term or len(term) >= 60 or term.lower() in seen_lower:
+            continue
+        seen_lower.add(term.lower())
+        found.append(term)
         if len(found) >= limit:
             break
     return found

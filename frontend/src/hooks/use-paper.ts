@@ -153,6 +153,13 @@ export function usePaper(documentId: string) {
     setPollNonce((n) => n + 1);
   }, [documentId]);
 
+  const reprocess = useCallback(async () => {
+    const document = await api.reprocess(documentId);
+    lastContentKey.current = "";
+    setData((d) => ({ ...d, document, sections: [], paragraphs: [] }));
+    setPollNonce((n) => n + 1);
+  }, [documentId]);
+
   return {
     ...data,
     loading,
@@ -164,6 +171,7 @@ export function usePaper(documentId: string) {
     addHighlight,
     removeHighlight,
     retranslate,
+    reprocess,
   };
 }
 

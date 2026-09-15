@@ -115,13 +115,14 @@ function ProcessingView() {
         </p>
         <ProcessingProgress document={doc} />
         {doc.status === "failed" && (
-          <Button
-            className="mt-5 w-full"
-            variant="outline"
-            render={<Link href="/" />}
-          >
-            回到首頁
-          </Button>
+          <div className="mt-5 flex gap-2">
+            <Button className="flex-1" onClick={() => paper.reprocess()}>
+              重新處理
+            </Button>
+            <Button className="flex-1" variant="outline" render={<Link href="/" />}>
+              回到首頁
+            </Button>
+          </div>
         )}
       </div>
     </div>

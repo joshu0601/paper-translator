@@ -78,6 +78,8 @@ export const api = {
   },
   createDemoDocument: () =>
     request<PaperDocument>("/api/documents/demo", { method: "POST" }),
+  reprocess: (id: string) =>
+    request<PaperDocument>(`/api/documents/${id}/process`, { method: "POST" }),
   translate: (id: string) =>
     request<PaperDocument>(`/api/documents/${id}/translate`, {
       method: "POST",

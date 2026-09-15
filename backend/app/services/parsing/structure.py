@@ -81,7 +81,7 @@ class ParsedDocument:
 
 SECTION_KINDS: list[tuple[str, re.Pattern[str]]] = [
     ("abstract", re.compile(r"^abstract\b", re.I)),
-    ("keywords", re.compile(r"^(keywords?|index terms)\b", re.I)),
+    ("keywords", re.compile(r"^(keywords?|index terms|article\s*info)\b", re.I)),
     ("introduction", re.compile(r"^introduction\b", re.I)),
     ("related_work", re.compile(r"^(related work|literature review|prior work|previous work)\b", re.I)),
     ("background", re.compile(r"^(background|preliminar(y|ies)|motivation)\b", re.I)),
@@ -110,6 +110,14 @@ _YEAR = re.compile(r"\b(19[89]\d|20[0-4]\d)\b")
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _ARXIV = re.compile(r"arxiv:\s*\d{4}\.\d{4,5}", re.I)
 _PAGE_NUMBER = re.compile(r"^\s*(page\s*)?\d{1,4}(\s*(of|/)\s*\d{1,4})?\s*$", re.I)
+# Publisher boilerplate that must never become a paragraph.
+_FRONT_NOISE = re.compile(
+    r"^(Article history|Received \d|Available online|©|Contents lists available|journal homepage|E-mail address(es)?:"
+    r"|[∗*]?\s*Corresponding author|https?://doi\.org|Manuscript received|Digital Object Identifier|Copyright ©)",
+    re.I,
+)
+# Elsevier-style letter-spaced headings: "a b s t r a c t"
+_SPACED_LETTERS = re.compile(r"^(?:[A-Za-z] )+[A-Za-z]$")
 
 
 def classify_section(title: str) -> str:
@@ -148,6 +156,9 @@ def _body_font_size(blocks: list[Block]) -> float:
 def _looks_like_heading(b: Block, body: float) -> tuple[bool, str | None, str]:
     """Return (is_heading, section_number, title)."""
     text = b.text.strip()
+    if _SPACED_LETTERS.match(text) and len(text) <= 40:
+        text = text.replace(" ", "")
+        text = text[0].upper() + text[1:]
     if len(text) > 140 or len(text) < 3:
         return False, None, text
     if text.endswith((".", ",", ";")) and not _NUMBERED_HEADING.match(text):
@@ -218,6 +229,27 @@ def _should_merge(prev: str, nxt: str) -> bool:
     return first.islower() or first in "(,;" or prev[-1] in ",—–"
 
 
+_VENUE_WORDS = re.compile(
+    r"\b(Proceedings|Conference|Journal|Transactions|Workshop|Symposium|arXiv|Letters|Magazine|Computer Systems|Networks)\b", re.I
+)
+
+
+def _pick_title(candidates: list[Block]) -> tuple[Block, Block | None]:
+    """Pick the title block on page 1.
+
+    Publisher templates (e.g. Elsevier) print the journal name in the largest
+    font, above the real title. When the biggest block looks like a venue name
+    and a nearly-as-large, wordier block follows, the latter is the title and
+    the former is reported as the venue."""
+    ranked = sorted(candidates, key=lambda b: (-b.font_size, b.bbox[1]))
+    top = ranked[0]
+    if _VENUE_WORDS.search(top.text) and len(top.text.split()) <= 8:
+        for b in ranked[1:]:
+            if b.font_size >= top.font_size * 0.7 and len(b.text.split()) > len(top.text.split()) and b.bbox[1] > top.bbox[1]:
+                return b, top
+    return top, None
+
+
 def _clean_title(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     return text.rstrip(" .*†‡")
@@ -225,7 +257,7 @@ def _clean_title(text: str) -> str:
 
 def _split_authors(text: str) -> list[str]:
     text = _EMAIL.sub("", text)
-    text = re.sub(r"[\*†‡§¶\d]+", "", text)
+    text = re.sub(r"[\*∗†‡§¶\d]+", "", text)
     parts = re.split(r",|\band\b|;|·|•", text)
     names = [p.strip(" .") for p in parts if 2 <= len(p.strip()) <= 60]
     return [n for n in names if re.search(r"[A-Za-z]", n) and len(n.split()) <= 5]
@@ -249,11 +281,15 @@ def parse(extracted: ExtractedDocument) -> ParsedDocument:
     first_page = [b for b in blocks if b.page == 1 and not _is_noise(b, body, page_heights.get(1, 800), repeated)]
     title = ""
     title_block: Block | None = None
+    venue: str | None = None
+    banner: Block | None = None
     if first_page:
         candidates = [b for b in first_page if 4 <= len(b.text) <= 300 and b.bbox[1] < page_heights.get(1, 800) * 0.5]
         if candidates:
-            title_block = max(candidates, key=lambda b: (b.font_size, -b.bbox[1]))
+            title_block, banner = _pick_title(candidates)
             title = _clean_title(title_block.text)
+            if banner is not None:
+                venue = banner.text.strip()
     meta_title = (extracted.metadata.get("title") or "").strip()
     if not title and 4 <= len(meta_title) <= 300:
         title = meta_title
@@ -264,17 +300,17 @@ def parse(extracted: ExtractedDocument) -> ParsedDocument:
     keywords: list[str] = []
     doi: str | None = None
     year: int | None = None
-    venue: str | None = None
 
     front_text = " ".join(b.text for b in first_page)
     if m := _DOI.search(front_text):
         doi = m.group(1).rstrip(".,;")
     if m := _YEAR.search(front_text):
         year = int(m.group(1))
-    for b in first_page[:12]:
-        if re.search(r"\b(Proceedings|Conference|Journal|Transactions|Workshop|Symposium|arXiv)\b", b.text) and len(b.text) < 160:
-            venue = b.text.strip()
-            break
+    if venue is None:
+        for b in first_page[:12]:
+            if _VENUE_WORDS.search(b.text) and len(b.text) < 160:
+                venue = b.text.strip()
+                break
 
     # ---- Sections & paragraphs ---------------------------------------------
     sections: list[ParsedSection] = []
@@ -292,6 +328,8 @@ def parse(extracted: ExtractedDocument) -> ParsedDocument:
             continue
         if b is title_block:
             after_title = True
+            continue
+        if b is banner or _FRONT_NOISE.match(text):
             continue
         if _is_noise(b, body, page_heights.get(b.page, 800), repeated):
             continue
@@ -317,7 +355,10 @@ def parse(extracted: ExtractedDocument) -> ParsedDocument:
             continue
         if re.match(r"^(keywords?|index terms)\s*[—:\-–]", text, re.I):
             kw = re.sub(r"^(keywords?|index terms)\s*[—:\-–]\s*", "", text, flags=re.I)
-            keywords = [k.strip(" .") for k in re.split(r"[;,·]", kw) if k.strip()]
+            # Separators are usually ; or , — Elsevier lists one keyword per line, so
+            # after line joining we split where a new capitalised keyword starts.
+            parts = re.split(r"[;,·]", kw) if re.search(r"[;,·]", kw) else re.split(r"(?<=[a-z\)]) (?=[A-Z])", kw)
+            keywords = [k.strip(" .") for k in parts if k.strip()]
             continue
 
         # Front matter before the abstract: authors / affiliations.

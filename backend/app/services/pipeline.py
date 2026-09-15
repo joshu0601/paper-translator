@@ -94,15 +94,15 @@ def persist_parsed(db: Session, doc: Document, parsed: ParsedDocument) -> None:
     db.query(Section).filter(Section.document_id == doc.id).delete()
     db.flush()
 
-    if not doc.title or doc.title == doc.file_name:
-        doc.title = parsed.title
+    # (Re)processing always refreshes detected metadata; users can PATCH it afterwards.
+    doc.title = parsed.title
     doc.authors = parsed.authors
     doc.affiliations = parsed.affiliations
     doc.abstract = parsed.abstract
     doc.keywords = parsed.keywords
-    doc.year = doc.year or parsed.year
-    doc.doi = doc.doi or parsed.doi
-    doc.venue = doc.venue or parsed.venue
+    doc.year = parsed.year
+    doc.doi = parsed.doi
+    doc.venue = parsed.venue
 
     section_ids: list[str] = []
     for si, sec in enumerate(parsed.sections):
@@ -221,32 +221,46 @@ def translate_document(db: Session, doc: Document, reporter: StepReporter, *, fo
     sample = "\n".join(p.original_text for p in paragraphs[:60])
     glossary = _terminology_for(db, doc, sample)
 
+    def cached_row(h: str) -> Translation | None:
+        return (
+            db.query(Translation)
+            .filter(Translation.source_hash == h, Translation.provider == translator.name)
+            .one_or_none()
+        )
+
+    # Papers repeat text (running footers, licence lines, table headers...).
+    # Track what this run has already translated so identical paragraphs are
+    # translated once and never produce duplicate cache rows.
+    seen: dict[str, str] = {}
+
     done = 0
     batch_size = max(1, s.translation_batch_size)
     for i in range(0, total, batch_size):
         batch = paragraphs[i : i + batch_size]
-        pending: list[Paragraph] = []
+        pending: dict[str, list[Paragraph]] = {}
         for p in batch:
             h = sha256(p.original_text)
-            cached = (
-                db.query(Translation)
-                .filter(Translation.source_hash == h, Translation.provider == translator.name)
-                .one_or_none()
-            )
-            if cached and not force:
+            if h in seen:
+                p.translated_text = seen[h]
+                continue
+            cached = cached_row(h) if not force else None
+            if cached:
                 p.translated_text = cached.translated_text
+                seen[h] = cached.translated_text
             else:
-                pending.append(p)
+                pending.setdefault(h, []).append(p)
         if pending:
-            translated = translator.translate_batch([p.original_text for p in pending], glossary)
-            for p, zh in zip(pending, translated):
-                p.translated_text = zh
-                h = sha256(p.original_text)
-                row = db.query(Translation).filter(Translation.source_hash == h, Translation.provider == translator.name).one_or_none()
+            sources = [group[0].original_text for group in pending.values()]
+            translated = translator.translate_batch(sources, glossary)
+            for (h, group), zh in zip(pending.items(), translated):
+                seen[h] = zh
+                for p in group:
+                    p.translated_text = zh
+                row = cached_row(h)
                 if row:
                     row.translated_text = zh
                 else:
-                    db.add(Translation(source_hash=h, provider=translator.name, source_text=p.original_text, translated_text=zh))
+                    db.add(Translation(source_hash=h, provider=translator.name, source_text=group[0].original_text, translated_text=zh))
         done += len(batch)
         db.commit()
         reporter.progress("translate", round(done * 100 / total))
@@ -333,6 +347,25 @@ def run_retranslate(document_id: str) -> None:
             reporter.fail("translate", f"{type(exc).__name__}: {exc}")
     finally:
         db.close()
+
+
+def resume_interrupted() -> list[str]:
+    """Re-queue documents left in `processing` by a server restart (the pipeline
+    runs in a daemon thread, so a reload/crash abandons it mid-way)."""
+    db = SessionLocal()
+    try:
+        stuck = db.query(Document).filter(Document.status == "processing").all()
+        ids = [d.id for d in stuck]
+        for doc in stuck:
+            doc.steps = initial_steps()
+            doc.error = None
+        db.commit()
+    finally:
+        db.close()
+    for doc_id in ids:
+        log.info("resuming interrupted processing for %s", doc_id)
+        start_background(run_pipeline, doc_id)
+    return ids
 
 
 def start_background(target, *args, **kwargs) -> threading.Thread:

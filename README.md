@@ -43,6 +43,17 @@ npm run dev
 
 Open http://localhost:3000, drop a PDF — or click **Try demo paper** to run the whole pipeline on a bundled sample paper.
 
+### Using it from other devices on your LAN
+
+Start the backend on all interfaces and open the frontend by your machine's IP:
+
+```bash
+cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
+cd frontend && npm run dev          # prints  Network: http://192.168.x.x:3000
+```
+
+The frontend derives the API URL from the address in the browser (`http://<host>:8000`), and the backend accepts private-network origins by default (`CORS_ALLOW_PRIVATE_NETWORK=true`). Allow ports 3000 and 8000 through the Windows Firewall if prompted. To point the frontend elsewhere set `NEXT_PUBLIC_API_BASE_URL`.
+
 ### 3. Real AI (optional)
 
 Edit `backend/.env`:

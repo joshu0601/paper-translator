@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"]
     )
+    # Also accept browsers on the local network (http://192.168.x.x:3000 etc.)
+    # so other devices can use a dev instance started with --host 0.0.0.0.
+    cors_allow_private_network: bool = True
 
     # --- Database -----------------------------------------------------------
     # SQLite (default, zero-setup) or PostgreSQL + pgvector, e.g.

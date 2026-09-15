@@ -23,6 +23,21 @@ def test_health(client):
     assert body["llm"] == "mock"
 
 
+def test_cors_allows_lan_origins(client):
+    for origin in ("http://192.168.10.166:3000", "http://10.0.0.5:3000", "http://localhost:3000"):
+        res = client.options(
+            "/api/documents",
+            headers={"Origin": origin, "Access-Control-Request-Method": "POST"},
+        )
+        assert res.status_code == 200, origin
+        assert res.headers.get("access-control-allow-origin") == origin
+    res = client.options(
+        "/api/documents",
+        headers={"Origin": "http://evil.example.com", "Access-Control-Request-Method": "POST"},
+    )
+    assert "access-control-allow-origin" not in res.headers
+
+
 def test_upload_rejects_non_pdf(client):
     res = client.post("/api/documents/upload", files={"file": ("x.txt", b"hello", "text/plain")})
     assert res.status_code == 400

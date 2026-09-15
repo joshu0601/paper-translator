@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   ChatRequest,
   ChatResponse,
   Figure,
@@ -14,9 +14,24 @@ import type {
   SummaryLength,
 } from "@/types";
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ??
-  "http://localhost:8000";
+/**
+ * Backend base URL. Explicit `NEXT_PUBLIC_API_BASE_URL` wins; otherwise the
+ * backend is assumed to run on port 8000 of the host that served this page,
+ * which also works for other devices on the LAN (they open
+ * http://<your-ip>:3000 and reach http://<your-ip>:8000).
+ */
+function resolveApiBase(): string {
+  const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
+  if (configured) return configured;
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  }
+  return "http://localhost:8000";
+}
+
+export function apiBase(): string {
+  return resolveApiBase();
+}
 
 export class ApiError extends Error {
   status: number;
@@ -27,7 +42,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${apiBase()}${path}`, {
     ...init,
     headers: {
       ...(init?.body instanceof FormData
@@ -52,15 +67,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function fileUrl(documentId: string) {
-  return `${API_BASE}/api/documents/${documentId}/file`;
+  return `${apiBase()}/api/documents/${documentId}/file`;
 }
 
 export function translatedPdfUrl(documentId: string) {
-  return `${API_BASE}/api/documents/${documentId}/translated.pdf`;
+  return `${apiBase()}/api/documents/${documentId}/translated.pdf`;
 }
 
 export function absoluteUrl(path: string) {
-  return path.startsWith("http") ? path : `${API_BASE}${path}`;
+  return path.startsWith("http") ? path : `${apiBase()}${path}`;
 }
 
 export const api = {

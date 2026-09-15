@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import {
@@ -7,8 +7,10 @@ import {
   DownloadIcon,
   FileTextIcon,
   LanguagesIcon,
+  LayoutTemplateIcon,
   PanelLeftIcon,
   PanelRightIcon,
+  RefreshCwIcon,
   SearchIcon,
   Loader2Icon,
   ZoomInIcon,
@@ -21,6 +23,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -62,9 +65,12 @@ export function WorkspaceHeader() {
     setSearchOpen,
   } = useWorkspace();
   const doc = paper.document!;
-  const translating =
-    doc.steps.find((s) => s.key === "translate")?.status === "running";
-  const layoutReady = doc.steps.find((s) => s.key === "layout")?.status === "done";
+  const translateStep = doc.steps.find((s) => s.key === "translate");
+  const layoutStep = doc.steps.find((s) => s.key === "layout");
+  const translating = translateStep?.status === "running";
+  const rendering = layoutStep?.status === "running";
+  const layoutReady = layoutStep?.status === "done";
+  const busy = doc.status !== "ready";
 
   const exportMarkdown = () => {
     const lines: string[] = [`# ${doc.title}`, ""];
@@ -195,16 +201,44 @@ export function WorkspaceHeader() {
         <DropdownMenuTrigger
           render={<Button variant="ghost" size="icon-sm" aria-label="Translation" />}
         >
-          {translating ? <Loader2Icon className="animate-spin" /> : <LanguagesIcon />}
+          {translating || rendering ? <Loader2Icon className="animate-spin" /> : <LanguagesIcon />}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Translation</DropdownMenuLabel>
+        <DropdownMenuContent align="end" className="min-w-56">
+          <DropdownMenuGroup>
+          <DropdownMenuLabel>翻譯</DropdownMenuLabel>
           <DropdownMenuItem
-            disabled={translating || doc.status !== "ready"}
+            disabled={busy}
+            onClick={() => paper.relayout()}
+          >
+            <LayoutTemplateIcon />
+            <div className="flex flex-col">
+              <span>重新產生版面</span>
+              <span className="text-[10px] text-muted-foreground">
+                用現有翻譯重排中文版 PDF，不重翻、不扣費
+              </span>
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={busy}
             onClick={() => paper.retranslate()}
           >
-            重新翻譯整篇論文
+            <RefreshCwIcon />
+            <div className="flex flex-col">
+              <span>重新翻譯整篇論文</span>
+              <span className="text-[10px] text-muted-foreground">
+                忽略快取全部重翻（較慢，會呼叫翻譯 API）
+              </span>
+            </div>
           </DropdownMenuItem>
+          </DropdownMenuGroup>
+          {(translating || rendering) && (
+            <>
+              <DropdownMenuSeparator />
+              <p className="px-1.5 py-1 text-[11px] text-muted-foreground">
+                {translating ? `翻譯中… ${translateStep?.percent ?? 0}%` : `產生版面中… ${layoutStep?.percent ?? 0}%`}
+              </p>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -215,6 +249,7 @@ export function WorkspaceHeader() {
           <DownloadIcon />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuGroup>
           <DropdownMenuLabel>Export</DropdownMenuLabel>
           <DropdownMenuItem
             disabled={!layoutReady}
@@ -229,6 +264,7 @@ export function WorkspaceHeader() {
           >
             開啟原始 PDF
           </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
 

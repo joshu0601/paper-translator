@@ -44,7 +44,8 @@ export function AIPanel() {
     setAiPanelOpen,
   } = useWorkspace();
   const doc = paper.document!;
-  const ready = doc.status === "ready";
+  // Chat only needs the AI index; a translation/layout re-run must not block it.
+  const ready = doc.steps.find((s) => s.key === "index")?.status === "done";
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");

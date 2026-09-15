@@ -14,7 +14,9 @@ router = APIRouter(prefix="/api", tags=["chat"])
 
 @router.post("/documents/{document_id}/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, doc: Document = Depends(get_document_or_404), db: Session = Depends(get_db)):
-    if doc.status != "ready":
+    # Answering only needs the AI index; a translation/layout re-run must not block it.
+    index_done = any(s.get("key") == "index" and s.get("status") == "done" for s in (doc.steps or []))
+    if not index_done:
         raise HTTPException(status_code=409, detail="Document is not ready yet")
     try:
         answer, citations, session, reply = answer_question(db, doc, req)

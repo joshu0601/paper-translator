@@ -159,6 +159,13 @@ export function usePaper(documentId: string) {
     setPollNonce((n) => n + 1);
   }, [documentId]);
 
+  const relayout = useCallback(async () => {
+    const document = await api.relayout(documentId);
+    lastContentKey.current = "";
+    setData((d) => ({ ...d, document }));
+    setPollNonce((n) => n + 1);
+  }, [documentId]);
+
   const reprocess = useCallback(async () => {
     const document = await api.reprocess(documentId);
     lastContentKey.current = "";
@@ -177,6 +184,7 @@ export function usePaper(documentId: string) {
     addHighlight,
     removeHighlight,
     retranslate,
+    relayout,
     reprocess,
   };
 }

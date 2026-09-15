@@ -85,6 +85,8 @@ export const api = {
     request<PaperDocument>("/api/documents/demo", { method: "POST" }),
   reprocess: (id: string) =>
     request<PaperDocument>(`/api/documents/${id}/process`, { method: "POST" }),
+  relayout: (id: string) =>
+    request<PaperDocument>(`/api/documents/${id}/layout`, { method: "POST" }),
   translate: (id: string) =>
     request<PaperDocument>(`/api/documents/${id}/translate`, {
       method: "POST",

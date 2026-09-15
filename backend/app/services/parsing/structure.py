@@ -399,6 +399,11 @@ def _captions(sections: list[ParsedSection], prefix: str) -> list[tuple[int, Par
     return out
 
 
+def _strip_label(caption: str) -> str:
+    """'Fig. 1. Architecture of…' → 'Architecture of…' (the label is stored separately)."""
+    return re.sub(r"^(Fig\.?|Figure|Table|TABLE|FIGURE)\s*\d+[a-z]?\s*[\.:\-–]?\s*", "", caption, flags=re.I).strip()
+
+
 def _nearest(items, page: int, bbox: tuple[float, float, float, float]):
     """Closest caption on the same page (by vertical distance)."""
     best = None
@@ -421,7 +426,7 @@ def _attach_figures(images: list[ImageBlock], sections: list[ParsedSection]) -> 
         if match:
             si, p, label = match
             used.add(id(p))
-            figures.append(ParsedFigure(page=img.page, caption=p.text, label=label.replace("Fig.", "Figure").replace("FIGURE", "Figure"), png=img.png, section_index=si))
+            figures.append(ParsedFigure(page=img.page, caption=_strip_label(p.text), label=label.replace("Fig.", "Figure").replace("FIGURE", "Figure"), png=img.png, section_index=si))
         else:
             si = _section_on_page(sections, img.page)
             figures.append(ParsedFigure(page=img.page, caption=f"Figure on page {img.page}", label=None, png=img.png, section_index=si))
@@ -437,7 +442,7 @@ def _attach_tables(tables: list[TableBlock], sections: list[ParsedSection]) -> l
         if match:
             si, p, label = match
             used.add(id(p))
-            out.append(ParsedTable(page=t.page, caption=p.text, label=label.title(), rows=t.rows, section_index=si))
+            out.append(ParsedTable(page=t.page, caption=_strip_label(p.text), label=label.title(), rows=t.rows, section_index=si))
         else:
             si = _section_on_page(sections, t.page)
             out.append(ParsedTable(page=t.page, caption=f"Table on page {t.page}", label=None, rows=t.rows, section_index=si))
@@ -445,7 +450,7 @@ def _attach_tables(tables: list[TableBlock], sections: list[ParsedSection]) -> l
     # sidebar lists every table of the paper.
     for si, p, label in caps:
         if id(p) not in used:
-            out.append(ParsedTable(page=p.page, caption=p.text, label=label.title(), rows=[], section_index=si))
+            out.append(ParsedTable(page=p.page, caption=_strip_label(p.text), label=label.title(), rows=[], section_index=si))
     out.sort(key=lambda t: (t.page, t.label or ""))
     return out
 

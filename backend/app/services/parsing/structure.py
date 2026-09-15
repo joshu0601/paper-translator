@@ -22,11 +22,33 @@ from app.services.pdf.extractor import Block, ExtractedDocument, ImageBlock, Tab
 
 
 @dataclass
+class TextBox:
+    """One physical text block of a paragraph (a paragraph continued across a
+    column or page break has several)."""
+
+    page: int
+    bbox: tuple[float, float, float, float]
+    chars: int
+    font_size: float
+
+    def as_dict(self) -> dict:
+        x0, y0, x1, y1 = self.bbox
+        return {"page": self.page, "x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0,
+                "chars": self.chars, "fontSize": self.font_size}
+
+
+@dataclass
 class ParsedParagraph:
     text: str
     page: int
     kind: str = "paragraph"  # paragraph | heading | equation | caption | list | reference
     bbox: tuple[float, float, float, float] | None = None
+    boxes: list[TextBox] = field(default_factory=list)
+
+
+def _para(text: str, b: Block, kind: str = "paragraph") -> ParsedParagraph:
+    return ParsedParagraph(text=text, page=b.page, kind=kind, bbox=b.bbox,
+                           boxes=[TextBox(b.page, b.bbox, len(b.text), b.font_size)])
 
 
 @dataclass
@@ -102,7 +124,11 @@ _NUMBERED_HEADING = re.compile(
     r"^(?P<num>(?:\d+(?:\.\d+)*\.?|[IVXLC]+\.|[A-Z]\.))\s+(?P<title>[A-Z][^\n]{1,120})$"
 )
 _ROMAN = re.compile(r"^[IVXLC]+$")
-_CAPTION = re.compile(r"^(?P<label>(Fig\.?|Figure|Table|TABLE|FIGURE)\s*(?P<num>\d+[a-z]?))[\.:\s]", re.I)
+# "Fig. 3." / "Figure 3:" / "Table 1 A side-by-side..." / "TABLE II" - but not a
+# sentence such as "Table 3 clearly shows ..." (lowercase continuation).
+_CAPTION = re.compile(
+    r"^(?P<label>(Fig\.?|Figure|Table|TABLE|FIGURE)\s*(?P<num>\d+[a-z]?|[IVX]+))(?:[\.:]|\s+(?=[A-Z\(]))", re.I
+)
 _EQUATION_TAG = re.compile(r"\(\s*\d+[a-z]?\s*\)\s*$")
 _REFERENCE_ITEM = re.compile(r"^\[\d+\]|^\d+\.\s+[A-Z]")
 _DOI = re.compile(r"\b(10\.\d{4,9}/[^\s\"<>]+)", re.I)
@@ -112,7 +138,7 @@ _ARXIV = re.compile(r"arxiv:\s*\d{4}\.\d{4,5}", re.I)
 _PAGE_NUMBER = re.compile(r"^\s*(page\s*)?\d{1,4}(\s*(of|/)\s*\d{1,4})?\s*$", re.I)
 # Publisher boilerplate that must never become a paragraph.
 _FRONT_NOISE = re.compile(
-    r"^(Article history|Received \d|Available online|©|Contents lists available|journal homepage|E-mail address(es)?:"
+    r"^(Article history|Received( in revised form)? \d|Accepted \d|Available online|©|Contents lists available|journal homepage|E-mail address(es)?:"
     r"|[∗*]?\s*Corresponding author|https?://doi\.org|Manuscript received|Digital Object Identifier|Copyright ©)",
     re.I,
 )
@@ -209,6 +235,83 @@ def _is_noise(b: Block, body: float, page_height: float, repeated: set[str]) -> 
     return False
 
 
+_TABLE_MARKS = "✓✔✗✘×•"
+_WORD_PUNCT = ".,;:()[]{}\"'“”‘’"
+
+
+def _real_words(text: str) -> int:
+    return sum(1 for w in text.split() if len(w.strip(_WORD_PUNCT)) >= 4 and w.strip(_WORD_PUNCT).isalpha())
+
+
+def _looks_tabular(text: str) -> bool:
+    """Rows of unruled tables: check-mark matrices, bullet grids, columns of
+    numbers - text with hardly any real words."""
+    if _SPACED_LETTERS.match(text):  # "a b s t r a c t" style headings
+        return False
+    marks = sum(text.count(c) for c in _TABLE_MARKS)
+    if marks >= 3 and marks * 4 >= len(text.split()):
+        return True
+    words = text.split()
+    if len(words) >= 6 and "=" not in text and not _EQUATION_TAG.search(text):
+        real = _real_words(text)
+        # Math-heavy prose still has a handful of real words; table rows have ~none.
+        if real <= 3 and real / len(words) < 0.25:
+            return True
+    return False
+
+
+def _table_cell_blocks(blocks: list[Block], regions: list[tuple[int, tuple[float, float, float, float]]]) -> set[int]:
+    """Ids of blocks that belong to a table.
+
+    Three signals: (1) the text itself is tabular (check-mark rows, bullet
+    grids); (2) the block lies inside a ruled table region detected from the
+    page's horizontal rules; (3) the block is chained directly below a
+    "Table N" caption. Such blocks stay untouched in the layout-preserving
+    translation and are not read as prose."""
+    cells: set[int] = set()
+    for b in blocks:
+        if _looks_tabular(b.text):
+            cells.add(id(b))
+            continue
+        area = max((b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]), 1.0)
+        for page, (rx0, ry0, rx1, ry1) in regions:
+            if page != b.page:
+                continue
+            ix = max(0.0, min(b.bbox[2], rx1) - max(b.bbox[0], rx0))
+            iy = max(0.0, min(b.bbox[3], ry1) - max(b.bbox[1], ry0))
+            if ix * iy >= 0.6 * area:
+                cells.add(id(b))
+                break
+    # Blocks chained directly below a "Table N" caption are the table body
+    # (journals print table captions above the table). The chain stops at a
+    # vertical gap or at the first long prose block.
+    by_page_all: dict[int, list[Block]] = {}
+    for b in blocks:
+        by_page_all.setdefault(b.page, []).append(b)
+    for page_blocks in by_page_all.values():
+        for cap in page_blocks:
+            m = _CAPTION.match(cap.text)
+            if not m or not m.group("label").lower().startswith("table") or len(cap.text) > 300:
+                continue
+            cur = cap
+            for step in range(60):
+                max_gap = 25 if step == 0 else 16  # rows are tightly packed; prose follows a larger gap
+                below = [
+                    o for o in page_blocks
+                    if o is not cur and o.bbox[1] >= cur.bbox[3] - 12 and o.bbox[1] - cur.bbox[3] <= max_gap
+                    and min(o.bbox[2], cap.bbox[2]) - max(o.bbox[0], cap.bbox[0]) > 0
+                ]
+                if not below:
+                    break
+                nxt = min(below, key=lambda o: o.bbox[1])
+                ratio = _real_words(nxt.text) / max(len(nxt.text.split()), 1)
+                if _CAPTION.match(nxt.text) or (len(nxt.text) > 80 and ratio > 0.55 and nxt.text[:1].isupper()):
+                    break
+                cells.add(id(nxt))
+                cur = nxt
+    return cells
+
+
 def _is_equation(text: str) -> bool:
     if _EQUATION_TAG.search(text) and len(text) < 300:
         return True
@@ -276,6 +379,7 @@ def parse(extracted: ExtractedDocument) -> ParsedDocument:
     # Running headers/footers repeat verbatim on many pages.
     line_counts = Counter(b.text.strip() for b in blocks if len(b.text) < 120)
     repeated = {t for t, c in line_counts.items() if c >= 3 and extracted.page_count >= 3}
+    table_cells = _table_cell_blocks(blocks, extracted.table_regions)
 
     # ---- Front matter -------------------------------------------------------
     first_page = [b for b in blocks if b.page == 1 and not _is_noise(b, body, page_heights.get(1, 800), repeated)]
@@ -333,6 +437,8 @@ def parse(extracted: ExtractedDocument) -> ParsedDocument:
             continue
         if _is_noise(b, body, page_heights.get(b.page, 800), repeated):
             continue
+        if id(b) in table_cells:
+            continue
 
         is_heading, number, heading_title = _looks_like_heading(b, body)
         if is_heading:
@@ -351,7 +457,7 @@ def parse(extracted: ExtractedDocument) -> ParsedDocument:
             if current.kind != "abstract":
                 push_section(current)
                 current = ParsedSection(title="Abstract", kind="abstract", number=None, start_page=b.page)
-            current.paragraphs.append(ParsedParagraph(text=body_text, page=b.page, bbox=b.bbox))
+            current.paragraphs.append(_para(body_text, b))
             continue
         if re.match(r"^(keywords?|index terms)\s*[—:\-–]", text, re.I):
             kw = re.sub(r"^(keywords?|index terms)\s*[—:\-–]\s*", "", text, flags=re.I)
@@ -384,23 +490,25 @@ def parse(extracted: ExtractedDocument) -> ParsedDocument:
         # Merge continuation fragments (column / page breaks) for prose.
         if kind == "paragraph" and current.paragraphs:
             last = current.paragraphs[-1]
-            if last.kind == "paragraph" and _should_merge(last.text, text):
+            if last.kind == "paragraph" and not b.para_start and _should_merge(last.text, text):
                 joiner = "" if last.text.endswith("-") else " "
                 last.text = (last.text[:-1] if last.text.endswith("-") else last.text) + joiner + text
+                last.boxes.append(TextBox(b.page, b.bbox, len(text), b.font_size))
                 continue
         if kind == "reference" and current.paragraphs:
             last = current.paragraphs[-1]
             if last.kind == "reference" and not _REFERENCE_ITEM.match(text):
                 last.text = f"{last.text} {text}"
+                last.boxes.append(TextBox(b.page, b.bbox, len(text), b.font_size))
                 continue
 
-        current.paragraphs.append(ParsedParagraph(text=text, page=b.page, kind=kind, bbox=b.bbox))
+        current.paragraphs.append(_para(text, b, kind))
     push_section(current)
 
     # Fall back to a single section when no headings were found at all.
     if not sections:
         sections = [ParsedSection(title="Paper", kind="other", number=None, start_page=1,
-                                  paragraphs=[ParsedParagraph(text=b.text, page=b.page, bbox=b.bbox) for b in blocks])]
+                                  paragraphs=[_para(b.text, b) for b in blocks])]
 
     abstract_sec = next((s for s in sections if s.kind == "abstract"), None)
     if abstract_sec and abstract_sec.paragraphs:

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePaper } from "@/hooks/use-paper";
@@ -6,6 +6,7 @@ import { WorkspaceProvider, useWorkspace } from "./workspace-context";
 import { WorkspaceHeader } from "./header";
 import { PaperSidebar } from "@/components/paper-sidebar/sidebar";
 import { PaperReader } from "@/components/paper-reader/reader";
+import { PageReader } from "@/components/paper-reader/page-reader";
 import { AIPanel } from "@/components/ai-chat/ai-panel";
 import { SearchDialog } from "@/components/search/search-dialog";
 import { ProcessingProgress } from "@/components/upload/processing-progress";
@@ -43,10 +44,11 @@ export function Workspace({ documentId }: { documentId: string }) {
 }
 
 function WorkspaceLayout() {
-  const { paper, sidebarOpen, aiPanelOpen } = useWorkspace();
+  const { paper, sidebarOpen, aiPanelOpen, layoutMode } = useWorkspace();
   const doc = paper.document!;
   const parsed = doc.steps.find((s) => s.key === "parse")?.status === "done";
   const showReader = parsed && paper.paragraphs.length > 0;
+  const reader = layoutMode === "page" ? <PageReader /> : <PaperReader />;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -64,11 +66,7 @@ function WorkspaceLayout() {
           <PaperSidebar />
         </aside>
         <main className="relative min-w-0 flex-1">
-          {showReader ? (
-            <PaperReader />
-          ) : (
-            <ProcessingView />
-          )}
+          {showReader ? reader : <ProcessingView />}
         </main>
         <aside
           className={cn(
@@ -89,7 +87,7 @@ function WorkspaceLayout() {
             <TabsTrigger value="ai">AI</TabsTrigger>
           </TabsList>
           <TabsContent value="paper" className="min-h-0 flex-1">
-            {showReader ? <PaperReader /> : <ProcessingView />}
+            {showReader ? reader : <ProcessingView />}
           </TabsContent>
           <TabsContent value="outline" className="min-h-0 flex-1">
             <PaperSidebar />

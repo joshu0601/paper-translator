@@ -178,6 +178,23 @@
   border-radius: 4px;
 }
 
+/* Same flash for the transparent overlays of the page-layout reader */
+@keyframes citation-flash-overlay {
+  0%,
+  60% {
+    background-color: rgb(250 204 21 / 0.4);
+    box-shadow: 0 0 0 3px rgb(250 204 21 / 0.6);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+.citation-flash-overlay {
+  animation: citation-flash-overlay 3.5s ease-out forwards;
+}
+
 mark.user-highlight {
   background-color: var(--highlight-strong);
   color: inherit;

@@ -62,6 +62,8 @@ class Document(Base):
     status: Mapped[str] = mapped_column(String(20), default="uploaded")
     steps: Mapped[list] = mapped_column(JSON, default=list)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Incremented whenever the translated layout is re-rendered (cache busting).
+    layout_version: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     sections: Mapped[list[Section]] = relationship(
@@ -106,6 +108,9 @@ class Paragraph(Base):
     order: Mapped[int] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(String(20), default="paragraph")
     bounding_box: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Every physical text block of the paragraph (page + rect in PDF points),
+    # used to overlay the original layout and to typeset the translated PDF.
+    boxes: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     document: Mapped[Document] = relationship(back_populates="paragraphs")
 

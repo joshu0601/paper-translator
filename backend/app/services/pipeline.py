@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Document, Figure, Paragraph, Section, Table, Terminology, Translation
-from app.services import rag
+from app.services import layout, rag
 from app.services.parsing import ParsedDocument, parse
 from app.services.pdf import extract
 from app.services.storage import get_storage
@@ -33,10 +33,12 @@ STEP_DEFS: list[tuple[str, str]] = [
     ("structure", "Detecting document structure"),
     ("parse", "Parsing paragraphs"),
     ("translate", "Translating paper"),
+    ("layout", "Rendering translated pages"),
     ("index", "Creating AI index"),
 ]
 
 TRANSLATABLE_KINDS = {"paragraph", "list", "caption"}
+DEFAULT_PAGE_DPI = 120
 
 
 def initial_steps(done: tuple[str, ...] = ("upload",)) -> list[dict]:
@@ -143,6 +145,7 @@ def persist_parsed(db: Session, doc: Document, parsed: ParsedDocument) -> None:
                     order=para_no,
                     kind=p.kind,
                     bounding_box=bbox,
+                    boxes=[box.as_dict() for box in p.boxes],
                 )
             )
 
@@ -272,6 +275,33 @@ def translate_document(db: Session, doc: Document, reporter: StepReporter, *, fo
 # --------------------------------------------------------------------------- #
 
 
+def translated_pdf_key(doc: Document) -> str:
+    return f"{doc.id}/translated.pdf"
+
+
+def render_layout(db: Session, doc: Document, reporter: StepReporter) -> None:
+    """Build the layout-preserving translated PDF and drop stale page renders."""
+    reporter.start("layout")
+    storage = get_storage()
+    paragraphs = db.query(Paragraph).filter(Paragraph.document_id == doc.id).order_by(Paragraph.order).all()
+    pdf_bytes = storage.get(doc.storage_key)
+    translated = layout.build_translated_pdf(pdf_bytes, paragraphs)
+    storage.put(translated_pdf_key(doc), translated)
+    storage.delete(f"{doc.id}/pages/translated")
+    doc.layout_version = (doc.layout_version or 0) + 1
+    db.commit()
+    # Pre-render both variants at the reader's default DPI so the first view
+    # does not wait on rasterisation (the API renders other DPIs on demand).
+    total = max(doc.page_count, 1)
+    for i in range(1, total + 1):
+        for variant, source in (("original", pdf_bytes), ("translated", translated)):
+            key = f"{doc.id}/pages/{variant}/{i}_{DEFAULT_PAGE_DPI}.png"
+            if not storage.exists(key):
+                storage.put(key, layout.render_page(source, i, DEFAULT_PAGE_DPI))
+        reporter.progress("layout", round(i * 100 / total))
+    reporter.done("layout")
+
+
 def index_document(db: Session, doc: Document, reporter: StepReporter) -> None:
     reporter.start("index")
     sections = db.query(Section).filter(Section.document_id == doc.id).order_by(Section.order).all()
@@ -318,6 +348,9 @@ def run_pipeline(document_id: str, *, parsed: ParsedDocument | None = None) -> N
             step = "translate"
             translate_document(db, doc, reporter)
 
+            step = "layout"
+            render_layout(db, doc, reporter)
+
             step = "index"
             index_document(db, doc, reporter)
 
@@ -339,12 +372,15 @@ def run_retranslate(document_id: str) -> None:
         reporter = StepReporter(db, doc)
         doc.status = "processing"
         db.commit()
+        step = "translate"
         try:
             translate_document(db, doc, reporter, force=True)
+            step = "layout"
+            render_layout(db, doc, reporter)
             doc.status = "ready"
             db.commit()
         except Exception as exc:
-            reporter.fail("translate", f"{type(exc).__name__}: {exc}")
+            reporter.fail(step, f"{type(exc).__name__}: {exc}")
     finally:
         db.close()
 

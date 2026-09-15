@@ -1,17 +1,18 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import io
 import re
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
 from app.models import Document, Figure, Paragraph, Section, Table
-from app.schemas import DocumentOut, DocumentPatch, FigureOut, ParagraphOut, SectionOut, TableOut
-from app.services import pipeline
+from app.schemas import DocumentOut, DocumentPatch, FigureOut, PageInfo, ParagraphOut, SectionOut, TableOut
+from app.services import layout, pipeline
 from app.services.demo import TITLE as DEMO_TITLE, build_demo_pdf
 from app.services.pdf import page_count
 from app.services.storage import get_storage
@@ -142,6 +143,58 @@ def retranslate(doc: Document = Depends(get_document_or_404), db: Session = Depe
     db.refresh(doc)
     pipeline.start_background(pipeline.run_retranslate, doc.id)
     return doc
+
+
+@router.get("/{document_id}/pages", response_model=list[PageInfo])
+def get_pages(doc: Document = Depends(get_document_or_404)):
+    sizes = layout.cached_page_sizes(doc.id, doc.storage_key)
+    return [
+        PageInfo(
+            page=i + 1, width=w, height=h,
+            original_url=f"/api/documents/{doc.id}/pages/{i + 1}/image?variant=original",
+            translated_url=f"/api/documents/{doc.id}/pages/{i + 1}/image?variant=translated",
+        )
+        for i, (w, h) in enumerate(sizes)
+    ]
+
+
+@router.get("/{document_id}/pages/{page_no}/image")
+def get_page_image(
+    page_no: int,
+    variant: Literal["original", "translated"] = "original",
+    dpi: int = Query(pipeline.DEFAULT_PAGE_DPI, ge=50, le=220),
+    doc: Document = Depends(get_document_or_404),
+):
+    """Rasterised page (PNG), cached in storage. The translated variant is only
+    available once the layout step has produced the translated PDF."""
+    if not 1 <= page_no <= max(doc.page_count, 1):
+        raise HTTPException(status_code=404, detail="Page not found")
+    storage = get_storage()
+    cache_key = f"{doc.id}/pages/{variant}/{page_no}_{dpi}.png"
+    if not storage.exists(cache_key):
+        source_key = doc.storage_key if variant == "original" else pipeline.translated_pdf_key(doc)
+        if not storage.exists(source_key):
+            raise HTTPException(status_code=404, detail="Translated layout not ready yet")
+        storage.put(cache_key, layout.render_page(storage.get(source_key), page_no, dpi))
+    headers = {"Cache-Control": "private, max-age=3600"}
+    path = storage.local_path(cache_key)
+    if path:
+        return FileResponse(path, media_type="image/png", headers=headers)
+    return StreamingResponse(io.BytesIO(storage.get(cache_key)), media_type="image/png", headers=headers)
+
+
+@router.get("/{document_id}/translated.pdf")
+def get_translated_pdf(doc: Document = Depends(get_document_or_404)):
+    storage = get_storage()
+    key = pipeline.translated_pdf_key(doc)
+    if not storage.exists(key):
+        raise HTTPException(status_code=404, detail="Translated PDF not ready yet")
+    name = re.sub(r"\.pdf$", "", doc.file_name, flags=re.I) + ".zh-TW.pdf"
+    path = storage.local_path(key)
+    if path:
+        return FileResponse(path, media_type="application/pdf", filename=name)
+    return StreamingResponse(io.BytesIO(storage.get(key)), media_type="application/pdf",
+                             headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @router.get("/{document_id}/sections", response_model=list[SectionOut])

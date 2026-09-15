@@ -74,7 +74,9 @@ Tables and the `vector` extension are created on startup. On SQLite, embeddings 
 - Heading detection + semantic section classification (Abstract, Introduction, Method, Results, …)
 - Stable paragraph IDs (`…__paragraph_0042`), page mapping, figure / table / caption detection
 - Traditional Chinese translation with terminology memory and a translation cache
-- Reading modes: English · 中文 · 中英對照 (default), linked paragraph hover highlighting
+- **Layout-preserving mode (原始版面, default)**: every page is rendered exactly as in the PDF — figures, tables, equations and page decorations stay in place — and the Chinese page is the same page with each paragraph re-typeset in Traditional Chinese *inside its own box* (English text redacted, Chinese inserted with font fallback + shrink/grow-to-fit). Tables, equations and math-heavy fragments are detected and left untouched. Download the result as a translated PDF (`…/translated.pdf`).
+- Text-flow mode (文字流): reflowed bilingual columns for long-form reading
+- Reading modes: English · 中文 · 中英對照 (default), linked paragraph hover highlighting; zoom for page mode
 - AI assistant with context modes (Entire Paper / Current Section / Current Page / Selected Text), explanation levels (Beginner → Researcher), quick actions
 - RAG over paragraph chunks; answers cite `[Page · Section · Paragraph]`; citations are validated against the document and clicking one scrolls to and flashes the paragraph
 - Selection toolbar: Explain · Translate · Summary · Ask AI · Highlight · Add Note
@@ -113,7 +115,8 @@ backend/app
 | POST | `/api/documents/upload` · `/api/documents/demo` |
 | GET / PATCH / DELETE | `/api/documents/{id}` |
 | GET | `/api/documents/{id}/sections` · `/paragraphs` · `/figures` · `/tables` · `/file` |
-| POST | `/api/documents/{id}/translate` |
+| GET | `/api/documents/{id}/pages` · `/pages/{n}/image?variant=original\|translated` · `/translated.pdf` |
+| POST | `/api/documents/{id}/translate` · `/api/documents/{id}/process` (re-run pipeline) |
 | POST | `/api/documents/{id}/chat` |
 | POST | `/api/documents/{id}/search` |
 | GET / POST | `/api/documents/{id}/notes` · `DELETE /api/notes/{id}` |

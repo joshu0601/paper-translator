@@ -2,13 +2,17 @@
 
 import Link from "next/link";
 import {
+  AlignLeftIcon,
   BookOpenIcon,
   DownloadIcon,
+  FileTextIcon,
   LanguagesIcon,
   PanelLeftIcon,
   PanelRightIcon,
   SearchIcon,
   Loader2Icon,
+  ZoomInIcon,
+  ZoomOutIcon,
 } from "lucide-react";
 import { useWorkspace } from "./workspace-context";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -22,8 +26,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { fileUrl } from "@/lib/api";
-import type { ReadingMode } from "@/types";
+import { fileUrl, translatedPdfUrl } from "@/lib/api";
+import type { LayoutMode, ReadingMode } from "@/types";
 import { cn } from "@/lib/utils";
 
 const READING_MODES: { value: ReadingMode; label: string }[] = [
@@ -32,11 +36,25 @@ const READING_MODES: { value: ReadingMode; label: string }[] = [
   { value: "bilingual", label: "中英對照" },
 ];
 
+const LAYOUT_MODES: {
+  value: LayoutMode;
+  label: string;
+  hint: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { value: "page", label: "原始版面", hint: "保留 PDF 版面（圖表原位）", icon: FileTextIcon },
+  { value: "text", label: "文字流", hint: "重排文字，適合長篇閱讀", icon: AlignLeftIcon },
+];
+
 export function WorkspaceHeader() {
   const {
     paper,
     readingMode,
     setReadingMode,
+    layoutMode,
+    setLayoutMode,
+    zoom,
+    setZoom,
     sidebarOpen,
     setSidebarOpen,
     aiPanelOpen,
@@ -46,6 +64,7 @@ export function WorkspaceHeader() {
   const doc = paper.document!;
   const translating =
     doc.steps.find((s) => s.key === "translate")?.status === "running";
+  const layoutReady = doc.steps.find((s) => s.key === "layout")?.status === "done";
 
   const exportMarkdown = () => {
     const lines: string[] = [`# ${doc.title}`, ""];
@@ -111,6 +130,50 @@ export function WorkspaceHeader() {
       </Button>
 
       <div className="hidden items-center rounded-lg border p-0.5 sm:flex">
+        {LAYOUT_MODES.map((m) => (
+          <Tooltip key={m.value}>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => setLayoutMode(m.value)}
+                  className={cn(
+                    "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                    layoutMode === m.value
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                />
+              }
+            >
+              <m.icon className="size-3.5" />
+              <span className="hidden lg:inline">{m.label}</span>
+            </TooltipTrigger>
+            <TooltipContent>{m.hint}</TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+
+      {layoutMode === "page" && (
+        <div className="hidden items-center gap-0.5 md:flex">
+          <Button variant="ghost" size="icon-sm" aria-label="縮小" onClick={() => setZoom(zoom - 0.1)}>
+            <ZoomOutIcon />
+          </Button>
+          <button
+            type="button"
+            className="w-10 text-center font-mono text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={() => setZoom(1)}
+            title="重設為 100%"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <Button variant="ghost" size="icon-sm" aria-label="放大" onClick={() => setZoom(zoom + 0.1)}>
+            <ZoomInIcon />
+          </Button>
+        </div>
+      )}
+
+      <div className="hidden items-center rounded-lg border p-0.5 sm:flex">
         {READING_MODES.map((m) => (
           <button
             key={m.value}
@@ -153,6 +216,12 @@ export function WorkspaceHeader() {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Export</DropdownMenuLabel>
+          <DropdownMenuItem
+            disabled={!layoutReady}
+            render={<a href={translatedPdfUrl(doc.id)} target="_blank" rel="noreferrer" />}
+          >
+            下載中文版 PDF（保留版面）
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={exportMarkdown}>匯出 Markdown</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem

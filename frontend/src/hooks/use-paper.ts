@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
@@ -6,6 +6,7 @@ import type {
   Figure,
   Highlight,
   Note,
+  PageInfo,
   PaperDocument,
   PaperTable,
   Paragraph,
@@ -16,6 +17,7 @@ export interface PaperData {
   document: PaperDocument | null;
   sections: Section[];
   paragraphs: Paragraph[];
+  pages: PageInfo[];
   figures: Figure[];
   tables: PaperTable[];
   notes: Note[];
@@ -34,6 +36,7 @@ export function usePaper(documentId: string) {
     document: null,
     sections: [],
     paragraphs: [],
+    pages: [],
     figures: [],
     tables: [],
     notes: [],
@@ -46,13 +49,14 @@ export function usePaper(documentId: string) {
   const lastContentKey = useRef<string>("");
 
   const loadContent = useCallback(async () => {
-    const [sections, paragraphs, figures, tables] = await Promise.all([
+    const [sections, paragraphs, figures, tables, pages] = await Promise.all([
       api.getSections(documentId),
       api.getParagraphs(documentId),
       api.getFigures(documentId),
       api.getTables(documentId),
+      api.getPages(documentId).catch(() => [] as PageInfo[]),
     ]);
-    setData((d) => ({ ...d, sections, paragraphs, figures, tables }));
+    setData((d) => ({ ...d, sections, paragraphs, figures, tables, pages }));
   }, [documentId]);
 
   const loadAnnotations = useCallback(async () => {
@@ -80,10 +84,12 @@ export function usePaper(documentId: string) {
         setData((d) => ({ ...d, document }));
         setError(null);
 
-        // Reload paragraphs when parsing is done, and again after translation.
+        // Reload paragraphs when parsing is done, and again after translation /
+        // layout rendering so the reader fills in progressively.
         const parsed = document.steps.find((s) => s.key === "parse");
         const translated = document.steps.find((s) => s.key === "translate");
-        const key = `${parsed?.status}-${translated?.status}-${document.status}`;
+        const layout = document.steps.find((s) => s.key === "layout");
+        const key = `${parsed?.status}-${translated?.status}-${layout?.status}-${document.status}`;
         if (
           (parsed?.status === "done" || document.status === "ready") &&
           key !== lastContentKey.current

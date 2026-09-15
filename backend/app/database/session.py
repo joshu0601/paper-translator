@@ -50,6 +50,25 @@ def init_db() -> None:
         with engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """Minimal forward-only migration: add columns that exist on the models but
+    not yet in the database (create_all never alters existing tables)."""
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing:
+                    continue
+                ddl = f'ALTER TABLE {table.name} ADD COLUMN "{column.name}" {column.type.compile(engine.dialect)}'
+                conn.execute(text(ddl))
 
 
 def get_db() -> Generator[Session, None, None]:

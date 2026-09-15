@@ -4,6 +4,7 @@ import type {
   Figure,
   Highlight,
   Note,
+  PageInfo,
   PaperDocument,
   PaperTable,
   Paragraph,
@@ -54,6 +55,10 @@ export function fileUrl(documentId: string) {
   return `${API_BASE}/api/documents/${documentId}/file`;
 }
 
+export function translatedPdfUrl(documentId: string) {
+  return `${API_BASE}/api/documents/${documentId}/translated.pdf`;
+}
+
 export function absoluteUrl(path: string) {
   return path.startsWith("http") ? path : `${API_BASE}${path}`;
 }
@@ -84,6 +89,7 @@ export const api = {
     request<PaperDocument>(`/api/documents/${id}/translate`, {
       method: "POST",
     }),
+  getPages: (id: string) => request<PageInfo[]>(`/api/documents/${id}/pages`),
   getSections: (id: string) => request<Section[]>(`/api/documents/${id}/sections`),
   getParagraphs: (id: string) =>
     request<Paragraph[]>(`/api/documents/${id}/paragraphs`),

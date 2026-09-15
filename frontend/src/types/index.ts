@@ -25,6 +25,8 @@ export interface PaperDocument {
   status: DocumentStatus;
   steps: ProcessingStep[];
   error?: string | null;
+  /** bumped each time the translated layout is re-rendered */
+  layoutVersion: number;
   createdAt: string;
 }
 
@@ -54,6 +56,14 @@ export interface BoundingBox {
   height: number;
 }
 
+export interface TextBox {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface Paragraph {
   id: string;
   documentId: string;
@@ -64,7 +74,19 @@ export interface Paragraph {
   order: number;
   kind: ParagraphKind;
   boundingBox?: BoundingBox | null;
+  /** physical text blocks in PDF points (a paragraph may span columns/pages) */
+  boxes: TextBox[];
 }
+
+export interface PageInfo {
+  page: number;
+  width: number;
+  height: number;
+  originalUrl: string;
+  translatedUrl: string;
+}
+
+export type LayoutMode = "text" | "page";
 
 export interface Figure {
   id: string;

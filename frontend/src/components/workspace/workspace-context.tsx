@@ -14,8 +14,26 @@ import type {
   ChatAction,
   ContextMode,
   ExplanationLevel,
+  LayoutMode,
   ReadingMode,
 } from "@/types";
+
+function readPref<T extends string>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    return (window.localStorage.getItem(key) as T | null) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writePref(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* private mode etc. */
+  }
+}
 
 export interface TextSelection {
   paragraphId: string;
@@ -39,6 +57,10 @@ interface WorkspaceContextValue {
   paper: PaperState;
   readingMode: ReadingMode;
   setReadingMode: (m: ReadingMode) => void;
+  layoutMode: LayoutMode;
+  setLayoutMode: (m: LayoutMode) => void;
+  zoom: number;
+  setZoom: (z: number) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (v: boolean) => void;
   sidebarTab: SidebarTab;
@@ -76,6 +98,18 @@ export function WorkspaceProvider({
   children: ReactNode;
 }) {
   const [readingMode, setReadingMode] = useState<ReadingMode>("bilingual");
+  // Layout preference is remembered per browser (defaults to the original PDF layout).
+  const [layoutMode, setLayoutModeState] = useState<LayoutMode>(() => readPref("paperai.layout", "page"));
+  const [zoom, setZoomState] = useState<number>(() => Number(readPref("paperai.zoom", "1")) || 1);
+  const setLayoutMode = useCallback((m: LayoutMode) => {
+    setLayoutModeState(m);
+    writePref("paperai.layout", m);
+  }, []);
+  const setZoom = useCallback((z: number) => {
+    const clamped = Math.min(2, Math.max(0.5, Math.round(z * 100) / 100));
+    setZoomState(clamped);
+    writePref("paperai.zoom", String(clamped));
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("outline");
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
@@ -129,6 +163,10 @@ export function WorkspaceProvider({
       paper,
       readingMode,
       setReadingMode,
+      layoutMode,
+      setLayoutMode,
+      zoom,
+      setZoom,
       sidebarOpen,
       setSidebarOpen,
       sidebarTab,
@@ -158,6 +196,10 @@ export function WorkspaceProvider({
     [
       paper,
       readingMode,
+      layoutMode,
+      setLayoutMode,
+      zoom,
+      setZoom,
       sidebarOpen,
       sidebarTab,
       aiPanelOpen,

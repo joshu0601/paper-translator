@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -42,7 +42,13 @@ class DocumentOut(CamelModel):
     status: DocumentStatus
     steps: list[ProcessingStep]
     error: str | None = None
+    layout_version: int = 0
     created_at: datetime
+
+    @field_validator("layout_version", mode="before")
+    @classmethod
+    def _none_version(cls, v):
+        return v or 0
 
 
 class DocumentPatch(CamelModel):
@@ -74,6 +80,14 @@ class BoundingBox(CamelModel):
     height: float
 
 
+class TextBoxOut(CamelModel):
+    page: int
+    x: float
+    y: float
+    width: float
+    height: float
+
+
 class ParagraphOut(CamelModel):
     id: str
     document_id: str
@@ -84,6 +98,20 @@ class ParagraphOut(CamelModel):
     order: int
     kind: str
     bounding_box: BoundingBox | None = None
+    boxes: list[TextBoxOut] = []
+
+    @field_validator("boxes", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v):
+        return v or []
+
+
+class PageInfo(CamelModel):
+    page: int
+    width: float
+    height: float
+    original_url: str
+    translated_url: str
 
 
 class FigureOut(CamelModel):

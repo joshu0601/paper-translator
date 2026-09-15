@@ -56,6 +56,10 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-opus-5"
+    # Thinking effort (low | medium | high | xhigh | max). Chat keeps the default;
+    # translation is a well-specified task, so a lower effort is faster and cheaper.
+    anthropic_effort: str | None = None
+    anthropic_translation_effort: str | None = "medium"
 
     mock_embedding_dimensions: int = 256
 

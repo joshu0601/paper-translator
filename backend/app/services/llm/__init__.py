@@ -7,7 +7,7 @@ from app.services.llm.base import LLMMessage, LLMProvider, LLMResponse
 from app.services.llm.mock_provider import MockLLMProvider
 
 
-def build_llm(kind: str | None = None) -> LLMProvider:
+def build_llm(kind: str | None = None, *, purpose: str = "chat") -> LLMProvider:
     s = get_settings()
     kind = kind or s.llm_provider
     if kind == "openai":
@@ -19,7 +19,8 @@ def build_llm(kind: str | None = None) -> LLMProvider:
     if kind == "anthropic":
         from app.services.llm.anthropic_provider import AnthropicProvider
 
-        return AnthropicProvider(s.anthropic_api_key, s.anthropic_model)
+        effort = s.anthropic_translation_effort if purpose == "translation" else s.anthropic_effort
+        return AnthropicProvider(s.anthropic_api_key, s.anthropic_model, effort=effort)
     return MockLLMProvider()
 
 

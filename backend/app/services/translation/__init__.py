@@ -210,7 +210,7 @@ def build_translator(kind: str | None = None) -> TranslationProvider:
     s = get_settings()
     kind = kind or s.translation_provider
     if kind in {"openai", "anthropic"}:
-        llm = build_llm(kind)
+        llm = build_llm(kind, purpose="translation")
         if kind == "openai" and s.openai_translation_model != s.openai_chat_model:
             from app.services.llm.openai_provider import OpenAIProvider
 

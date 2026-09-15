@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { FileTextIcon, UploadCloudIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { cn, formatBytes } from "@/lib/utils";
 
 interface Props {
@@ -21,11 +21,14 @@ export function UploadDropzone({ onUpload, disabled }: Props) {
     if (accepted[0]) setFile(accepted[0]);
   }, []);
 
-  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: { "application/pdf": [".pdf"] },
     multiple: false,
     noClick: true,
+    // The classic <input type="file"> works everywhere (mobile browsers, plain
+    // HTTP on the LAN); the File System Access API does not.
+    useFsAccessApi: false,
     disabled: disabled || busy,
     onDropRejected: () => setError("只支援 PDF 檔案。"),
   });
@@ -53,7 +56,7 @@ export function UploadDropzone({ onUpload, disabled }: Props) {
             : "border-border bg-card hover:border-foreground/30",
         )}
       >
-        <input {...getInputProps()} />
+        <input {...getInputProps({ id: "pdf-file-input" })} />
         <div className="flex size-12 items-center justify-center rounded-full bg-muted">
           <UploadCloudIcon className="size-6 text-muted-foreground" />
         </div>
@@ -61,9 +64,17 @@ export function UploadDropzone({ onUpload, disabled }: Props) {
           <p className="text-base font-medium">Drop your research paper here</p>
           <p className="text-sm text-muted-foreground">or</p>
         </div>
-        <Button type="button" variant="outline" onClick={open} disabled={disabled || busy}>
+        {/* A label bound to the real file input opens the picker natively on every browser. */}
+        <label
+          htmlFor="pdf-file-input"
+          className={cn(
+            buttonVariants({ variant: "outline" }),
+            "cursor-pointer",
+            (disabled || busy) && "pointer-events-none opacity-50",
+          )}
+        >
           Choose PDF
-        </Button>
+        </label>
         <p className="text-xs text-muted-foreground">目前僅支援 .pdf</p>
       </div>
 

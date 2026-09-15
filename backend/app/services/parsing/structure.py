@@ -124,6 +124,7 @@ _NUMBERED_HEADING = re.compile(
     r"^(?P<num>(?:\d+(?:\.\d+)*\.?|[IVXLC]+\.|[A-Z]\.))\s+(?P<title>[A-Z][^\n]{1,120})$"
 )
 _ROMAN = re.compile(r"^[IVXLC]+$")
+_NUMBER_ONLY = re.compile(r"^\d+(\.\d+)*\.?$")
 # "Fig. 3." / "Figure 3:" / "Table 1 A side-by-side..." / "TABLE II" - but not a
 # sentence such as "Table 3 clearly shows ..." (lowercase continuation).
 _CAPTION = re.compile(
@@ -220,12 +221,14 @@ def _looks_like_heading(b: Block, body: float) -> tuple[bool, str | None, str]:
 
 def _is_noise(b: Block, body: float, page_height: float, repeated: set[str]) -> bool:
     text = b.text.strip()
-    if _PAGE_NUMBER.match(text):
+    top = b.bbox[1] < page_height * 0.06
+    bottom = b.bbox[3] > page_height * 0.94
+    # A bare number is a page number unless it is a bold/large section number
+    # in the body of the page (ACL prints "3" and "Dense Passage Retriever" apart).
+    if _PAGE_NUMBER.match(text) and (top or bottom or not (b.bold_ratio >= 0.6 or b.font_size >= body * 1.08)):
         return True
     if text in repeated:
         return True
-    top = b.bbox[1] < page_height * 0.06
-    bottom = b.bbox[3] > page_height * 0.94
     if (top or bottom) and (b.font_size < body * 0.9 or len(text) < 80):
         return True
     if b.font_size < body * 0.7 and len(text) < 40:
@@ -236,6 +239,7 @@ def _is_noise(b: Block, body: float, page_height: float, repeated: set[str]) -> 
 
 
 _TABLE_MARKS = "✓✔✗✘×•"
+_NUMERIC_TOKEN = re.compile(r"^[\(\[]?[+\-−]?\d[\d,]*(\.\d+)?%?[\)\]]?[,;]?$|^[-–—]$")
 _WORD_PUNCT = ".,;:()[]{}\"'“”‘’"
 
 
@@ -256,6 +260,10 @@ def _looks_tabular(text: str) -> bool:
         real = _real_words(text)
         # Math-heavy prose still has a handful of real words; table rows have ~none.
         if real <= 3 and real / len(words) < 0.25:
+            return True
+        # Numeric result rows: "NQ 79,168 8,757 3,610 TriviaQA 78,785 ..."
+        numeric = sum(1 for w in words if _NUMERIC_TOKEN.match(w))
+        if numeric / len(words) >= 0.5:
             return True
     return False
 
@@ -282,9 +290,15 @@ def _table_cell_blocks(blocks: list[Block], regions: list[tuple[int, tuple[float
             if ix * iy >= 0.6 * area:
                 cells.add(id(b))
                 break
-    # Blocks chained directly below a "Table N" caption are the table body
-    # (journals print table captions above the table). The chain stops at a
-    # vertical gap or at the first long prose block.
+    # Blocks chained directly below (journal style) or above (ACL style) a
+    # "Table N" caption are the table body. The chain stops at a vertical gap
+    # or at the first prose block.
+    def is_prose(b: Block) -> bool:
+        ratio = _real_words(b.text) / max(len(b.text.split()), 1)
+        if _CAPTION.match(b.text) or _NUMBERED_HEADING.match(b.text) or classify_section(b.text) != "other":
+            return True  # another caption or a section heading
+        return (len(b.text) > 80 and ratio > 0.55) or len(b.text) > 250
+
     by_page_all: dict[int, list[Block]] = {}
     for b in blocks:
         by_page_all.setdefault(b.page, []).append(b)
@@ -293,22 +307,24 @@ def _table_cell_blocks(blocks: list[Block], regions: list[tuple[int, tuple[float
             m = _CAPTION.match(cap.text)
             if not m or not m.group("label").lower().startswith("table") or len(cap.text) > 300:
                 continue
-            cur = cap
-            for step in range(60):
-                max_gap = 25 if step == 0 else 16  # rows are tightly packed; prose follows a larger gap
-                below = [
-                    o for o in page_blocks
-                    if o is not cur and o.bbox[1] >= cur.bbox[3] - 12 and o.bbox[1] - cur.bbox[3] <= max_gap
-                    and min(o.bbox[2], cap.bbox[2]) - max(o.bbox[0], cap.bbox[0]) > 0
-                ]
-                if not below:
-                    break
-                nxt = min(below, key=lambda o: o.bbox[1])
-                ratio = _real_words(nxt.text) / max(len(nxt.text.split()), 1)
-                if _CAPTION.match(nxt.text) or (len(nxt.text) > 80 and ratio > 0.55 and nxt.text[:1].isupper()):
-                    break
-                cells.add(id(nxt))
-                cur = nxt
+            for direction in (1, -1):
+                cur = cap
+                for step in range(60):
+                    max_gap = 25 if step == 0 else 16  # rows are tightly packed; prose follows a larger gap
+                    if direction == 1:
+                        cand = [o for o in page_blocks if o is not cur and o.bbox[1] >= cur.bbox[3] - 12
+                                and o.bbox[1] - cur.bbox[3] <= max_gap]
+                    else:
+                        cand = [o for o in page_blocks if o is not cur and o.bbox[3] <= cur.bbox[1] + 12
+                                and cur.bbox[1] - o.bbox[3] <= max_gap]
+                    cand = [o for o in cand if min(o.bbox[2], cap.bbox[2]) - max(o.bbox[0], cap.bbox[0]) > 0]
+                    if not cand:
+                        break
+                    nxt = min(cand, key=lambda o: o.bbox[1]) if direction == 1 else max(cand, key=lambda o: o.bbox[3])
+                    if is_prose(nxt):
+                        break
+                    cells.add(id(nxt))
+                    cur = nxt
     return cells
 
 
@@ -428,6 +444,9 @@ def parse(extracted: ExtractedDocument) -> ParsedDocument:
         if sec.paragraphs or sec.kind not in {"front_matter"}:
             sections.append(sec)
 
+    # Some templates (ACL) emit the section number and its title as two blocks.
+    pending_number: tuple[str, Block] | None = None
+
     for b in blocks:
         text = b.text.strip()
         if not text:
@@ -439,10 +458,20 @@ def parse(extracted: ExtractedDocument) -> ParsedDocument:
             continue
         if _is_noise(b, body, page_heights.get(b.page, 800), repeated):
             continue
-        if id(b) in table_cells:
+        if id(b) in table_cells and not _NUMBER_ONLY.match(text):
+            continue
+
+        if _NUMBER_ONLY.match(text) and (b.bold_ratio >= 0.6 or b.font_size >= body * 1.08) and len(text) <= 8:
+            pending_number = (text.rstrip("."), b)
             continue
 
         is_heading, number, heading_title = _looks_like_heading(b, body)
+        if pending_number and not is_heading and len(text) <= 120 and abs(b.bbox[1] - pending_number[1].bbox[1]) <= body:
+            # The title block sits on the same line as the bare number.
+            is_heading, number, heading_title = True, pending_number[0], text
+        elif pending_number and is_heading and number is None:
+            number = pending_number[0]
+        pending_number = None
         if is_heading:
             kind = classify_section(heading_title)
             # "Abstract" / "Keywords" often appear as inline labels.

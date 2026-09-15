@@ -12,6 +12,24 @@ def test_classify_section():
     assert classify_section("Some Custom Heading") == "other"
 
 
+def test_table_caption_chain_stops_at_prose():
+    from app.services.parsing.structure import _table_cell_blocks
+    from app.services.pdf.extractor import Block
+
+    def block(y0, y1, text):
+        return Block(page=4, bbox=(307, y0, 527, y1), text=text, font_size=10, bold_ratio=0, char_count=len(text))
+
+    caption = block(60, 72, "Table 1: Number of questions in each QA dataset.")
+    header = block(75, 86, "Dataset Train Dev Test")
+    row1 = block(88, 99, "NQ 79,168 8,757 3,610")
+    row2 = block(101, 112, "TriviaQA 78,785 8,837 11,313")
+    prose = block(116, 400, "as well as various Web sources and is intended for open-domain QA from unstructured corpora. "
+                            "SQuAD v1.1 is a popular benchmark dataset for reading comprehension. " * 4)
+    cells = _table_cell_blocks([caption, header, row1, row2, prose], [])
+    assert {id(header), id(row1), id(row2)} <= cells
+    assert id(prose) not in cells
+
+
 def test_demo_pdf_structure():
     extracted = extract(build_demo_pdf())
     assert extracted.page_count >= 3

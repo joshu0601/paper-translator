@@ -385,6 +385,26 @@ def run_retranslate(document_id: str) -> None:
         db.close()
 
 
+def run_relayout(document_id: str) -> None:
+    """Rebuild the translated PDF and page renders from the stored translations."""
+    db = SessionLocal()
+    try:
+        doc = db.get(Document, document_id)
+        if doc is None:
+            return
+        reporter = StepReporter(db, doc)
+        doc.status = "processing"
+        db.commit()
+        try:
+            render_layout(db, doc, reporter)
+            doc.status = "ready"
+            db.commit()
+        except Exception as exc:
+            reporter.fail("layout", f"{type(exc).__name__}: {exc}")
+    finally:
+        db.close()
+
+
 def resume_interrupted() -> list[str]:
     """Re-queue documents left in `processing` by a server restart (the pipeline
     runs in a daemon thread, so a reload/crash abandons it mid-way)."""

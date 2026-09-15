@@ -315,6 +315,8 @@ def _table_cell_blocks(blocks: list[Block], regions: list[tuple[int, tuple[float
 def _is_equation(text: str) -> bool:
     if _EQUATION_TAG.search(text) and len(text) < 300:
         return True
+    if "=" in text and _real_words(text) < 3:
+        return True
     symbols = sum(text.count(c) for c in "=∑∫∏≤≥≈∈∀∃αβγδλμσθπ⋅×÷±√∞∂∇")
     letters = sum(c.isalpha() for c in text)
     return len(text) < 200 and symbols >= 2 and symbols * 6 > max(letters, 1)

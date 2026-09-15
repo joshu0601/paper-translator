@@ -1,4 +1,4 @@
-# PaperAI — AI Academic Reading Workspace
+﻿# PaperAI — AI Academic Reading Workspace
 
 Upload an English academic paper, read it side by side with a Traditional Chinese translation, and ask questions that are answered from the paper itself — every answer carries clickable citations that jump to the source paragraph.
 
@@ -116,7 +116,7 @@ backend/app
 | GET / PATCH / DELETE | `/api/documents/{id}` |
 | GET | `/api/documents/{id}/sections` · `/paragraphs` · `/figures` · `/tables` · `/file` |
 | GET | `/api/documents/{id}/pages` · `/pages/{n}/image?variant=original\|translated` · `/translated.pdf` |
-| POST | `/api/documents/{id}/translate` · `/api/documents/{id}/process` (re-run pipeline) |
+| POST | `/api/documents/{id}/translate` · `/process` (re-run pipeline) · `/layout` (re-render translated PDF) |
 | POST | `/api/documents/{id}/chat` |
 | POST | `/api/documents/{id}/search` |
 | GET / POST | `/api/documents/{id}/notes` · `DELETE /api/notes/{id}` |

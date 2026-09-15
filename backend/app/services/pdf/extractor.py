@@ -244,6 +244,16 @@ def _reading_order(blocks: list[Block], page_width: float) -> list[Block]:
 
 _CAPTION_START = re.compile(r"^(Fig\.?|Figure|Table|TABLE|FIGURE)\s*\d", re.I)
 _REF_START = re.compile(r"^\[\d{1,3}\]\s")
+_EQ_TAG = re.compile(r"\(\d{1,3}[a-z]?\)\s*$")
+_WORD = re.compile(r"[A-Za-z]{4,}")
+
+
+def _looks_math(text: str) -> bool:
+    """A display-equation line: numbered tag at the end, or an '=' with hardly
+    any words. Such lines are never merged into prose."""
+    if _EQ_TAG.search(text) and len(text) < 200:
+        return True
+    return "=" in text and len(_WORD.findall(text)) < 3
 
 
 def _typical_line_gap(raw_blocks: list[dict]) -> float | None:
@@ -314,6 +324,7 @@ def _merge_adjacent(blocks: list[Block], line_gap: float | None = None) -> list[
                 same_font and same_col and close and not_new_para and not prev_ends_short
                 and not bold_mismatch and not b.para_start and not _CAPTION_START.match(b.text)
                 and not _REF_START.match(b.text)
+                and not _looks_math(b.text) and not _looks_math(prev.text)
             ):
                 prev.text = _join_lines([prev.text, b.text])
                 prev.bbox = (min(prev.bbox[0], b.bbox[0]), prev.bbox[1], max(prev.bbox[2], b.bbox[2]), b.bbox[3])

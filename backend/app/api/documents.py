@@ -145,6 +145,23 @@ def retranslate(doc: Document = Depends(get_document_or_404), db: Session = Depe
     return doc
 
 
+@router.post("/{document_id}/layout", response_model=DocumentOut)
+def relayout(doc: Document = Depends(get_document_or_404), db: Session = Depends(get_db)):
+    """Re-render the layout-preserving translated PDF from stored translations."""
+    if doc.status == "processing":
+        raise HTTPException(status_code=409, detail="Document is still processing")
+    doc.status = "processing"
+    steps = [dict(s) for s in doc.steps]
+    for s in steps:
+        if s["key"] == "layout":
+            s.update(status="running", percent=0)
+    doc.steps = steps
+    db.commit()
+    db.refresh(doc)
+    pipeline.start_background(pipeline.run_relayout, doc.id)
+    return doc
+
+
 @router.get("/{document_id}/pages", response_model=list[PageInfo])
 def get_pages(doc: Document = Depends(get_document_or_404)):
     sizes = layout.cached_page_sizes(doc.id, doc.storage_key)
